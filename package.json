@@ -20,7 +20,9 @@
   ],
   "scripts": {
     "build": "bun build src/index.ts src/plugin.ts --outdir dist --format esm --sourcemap --external esbuild-wasm --external fflate --external vite && bun x tsc --emitDeclarationOnly",
-    "prepublishOnly": "bun run build"
+    "build:ui": "cd ui && bun install && bun run build",
+    "build:all": "bun run build && bun run build:ui",
+    "prepublishOnly": "bun run build:all"
   },
   "keywords": [
     "vite",

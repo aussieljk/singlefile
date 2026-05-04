@@ -24,24 +24,29 @@ export default defineConfig({
 })
 ```
 
-Then visit `/__singlefile/` in your dev server to download your bundled HTML.
+Then visit `/__singlefile/` in your dev server.
 
-## Routes
+## Features
+
+- **Code Editor** - Edit source files directly in the browser
+- **Download** - Build and download as single HTML file
+- **Send to URL** - Build and POST to any endpoint with Bearer auth
+
+## UI Routes
 
 | Route | Description |
 |-------|-------------|
-| `/__singlefile/` | Dashboard UI |
-| `/__singlefile/download?mode=online` | Download (deps from CDN) |
-| `/__singlefile/download?mode=offline` | Download (fully self-contained) |
-| `/__singlefile/build` | JSON build result |
+| `/__singlefile/` | Builder UI |
+| `/__singlefile/sources` | JSON of source files |
+| `/__singlefile/deps` | JSON of dependencies |
+| `/__singlefile/lib.js` | Bundler library |
 
 ## Options
 
 ```ts
 singlefile({
-  title: "My App",           // HTML title (default: "App")
-  mode: "online",            // Default mode: "online" | "offline"
-  sourceZipName: "src.zip",  // Name for embedded source zip
+  title: "My App",    // HTML title (default: "App")
+  mode: "online",     // Default mode: "online" | "offline"
 })
 ```
 
@@ -52,6 +57,12 @@ singlefile({
 | online | ~2s | Smaller | Required |
 | offline | ~5-30s | Larger | Not required |
 
-## Source Download
+## Send to URL
 
-Generated HTML embeds a zip of source files. Visit `yourfile.html#source` to download.
+The builder UI includes a form to POST the built HTML to any URL:
+- Enter the target URL
+- Optionally add a Bearer token for auth
+- Select build mode (online/offline)
+- Click "Build & Send"
+
+The HTML is sent as the request body with `Content-Type: text/html`.

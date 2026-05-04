@@ -28,17 +28,6 @@ export function singlefile(options: SinglefilePluginOptions = {}): Plugin {
           return
         }
 
-        // Serve the library bundle
-        if (path === "/__singlefile/lib.js") {
-          const fs = await import("fs/promises")
-          const p = await import("path")
-          const libPath = p.join(p.dirname(import.meta.url.replace("file://", "")), "index.js")
-          const code = await fs.readFile(libPath, "utf-8")
-          res.setHeader("Content-Type", "application/javascript")
-          res.end(code)
-          return
-        }
-
         // Serve deps from package.json
         if (path === "/__singlefile/deps") {
           try {
@@ -52,14 +41,65 @@ export function singlefile(options: SinglefilePluginOptions = {}): Plugin {
           return
         }
 
-        // Serve the builder app
-        if (path === "/__singlefile" || path === "/__singlefile/") {
-          res.setHeader("Content-Type", "text/html")
-          res.end(getBuilderHtml(options))
+        // Serve the library bundle
+        if (path === "/__singlefile/lib.js") {
+          try {
+            const fs = await import("fs/promises")
+            const p = await import("path")
+            const libPath = p.join(p.dirname(import.meta.url.replace("file://", "")), "index.js")
+            const code = await fs.readFile(libPath, "utf-8")
+            res.setHeader("Content-Type", "application/javascript")
+            res.end(code)
+          } catch (e: any) {
+            res.statusCode = 500
+            res.end(`console.error("Failed to load lib:", ${JSON.stringify(e.message)})`)
+          }
           return
         }
 
-        next()
+        // Serve built UI files
+        const uiPath = path.replace("/__singlefile", "") || "/index.html"
+        try {
+          const fs = await import("fs/promises")
+          const p = await import("path")
+          const uiDir = p.join(p.dirname(import.meta.url.replace("file://", "")), "ui")
+          let filePath = p.join(uiDir, uiPath)
+
+          // Default to index.html for directory requests
+          if (filePath.endsWith("/") || !p.extname(filePath)) {
+            filePath = p.join(uiDir, "index.html")
+          }
+
+          const stat = await fs.stat(filePath).catch(() => null)
+          if (!stat || !stat.isFile()) {
+            filePath = p.join(uiDir, "index.html")
+          }
+
+          let content = await fs.readFile(filePath, "utf-8")
+
+          // Inject config into index.html
+          if (filePath.endsWith("index.html")) {
+            const config = JSON.stringify({ title: options.title || "App", mode: options.mode || "online" })
+            content = content.replace(
+              "<head>",
+              `<head><script>window.__SINGLEFILE_CONFIG__=${config}</script>`
+            )
+          }
+
+          const ext = p.extname(filePath)
+          const mimeTypes: Record<string, string> = {
+            ".html": "text/html",
+            ".js": "application/javascript",
+            ".css": "text/css",
+            ".json": "application/json",
+          }
+          res.setHeader("Content-Type", mimeTypes[ext] || "text/plain")
+          res.end(content)
+        } catch (e: any) {
+          // Fallback to inline HTML if UI not built
+          res.setHeader("Content-Type", "text/html")
+          res.end(getFallbackHtml(options))
+        }
       })
     },
   }
@@ -102,121 +142,25 @@ async function readDeps(server: ViteDevServer): Promise<Record<string, string>> 
   }
 }
 
-function getBuilderHtml(options: SinglefilePluginOptions) {
-  const title = options.title || "App"
-  const defaultMode = options.mode || "online"
-
+function getFallbackHtml(options: SinglefilePluginOptions) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Singlefile Builder</title>
-  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <style>
+    body { font-family: system-ui; background: #09090b; color: #fafafa; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+    .container { text-align: center; }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    p { color: #a1a1aa; }
+  </style>
 </head>
-<body class="bg-zinc-950 text-zinc-100 min-h-screen flex items-center justify-center p-8">
-  <div id="app" class="max-w-md w-full space-y-6">
-    <h1 class="text-2xl font-semibold">Singlefile Builder</h1>
-    <p class="text-zinc-400">Bundle your app into a single HTML file.</p>
-    <div id="status" class="text-zinc-500">Loading...</div>
+<body>
+  <div class="container">
+    <h1>Singlefile Builder</h1>
+    <p>UI not built. Run: <code>cd ui && bun run build</code></p>
   </div>
-
-  <script type="importmap">
-    {
-      "imports": {
-        "esbuild-wasm": "https://esm.sh/esbuild-wasm@0.27.7",
-        "fflate": "https://esm.sh/fflate@0.8.2"
-      }
-    }
-  </script>
-  <script type="module">
-    import { buildSinglefile, downloadHtml } from "/__singlefile/lib.js"
-
-    const title = ${JSON.stringify(title)}
-    const defaultMode = ${JSON.stringify(defaultMode)}
-    const status = document.getElementById("status")
-    const app = document.getElementById("app")
-
-    async function init() {
-      status.textContent = "Fetching sources..."
-
-      const [sourcesRes, depsRes] = await Promise.all([
-        fetch("/__singlefile/sources"),
-        fetch("/__singlefile/deps")
-      ])
-
-      const sourceFiles = await sourcesRes.json()
-      const deps = await depsRes.json()
-      const fileCount = Object.keys(sourceFiles).length
-
-      status.textContent = \`Ready: \${fileCount} files\`
-
-      app.innerHTML = \`
-        <h1 class="text-2xl font-semibold">Singlefile Builder</h1>
-        <p class="text-zinc-400">\${fileCount} source files ready to bundle.</p>
-
-        <div class="space-y-3">
-          <button id="online" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-lg font-medium transition">
-            Download (Online)
-          </button>
-          <button id="offline" class="w-full bg-zinc-800 hover:bg-zinc-700 py-3 rounded-lg font-medium transition">
-            Download (Offline)
-          </button>
-        </div>
-
-        <div class="text-sm text-zinc-500 space-y-1">
-          <p><strong>Online:</strong> Smaller file, loads deps from CDN (~2s)</p>
-          <p><strong>Offline:</strong> Larger file, fully self-contained (~5-30s)</p>
-        </div>
-
-        <div id="progress" class="hidden p-4 rounded-lg bg-zinc-900 text-sm"></div>
-      \`
-
-      const progress = document.getElementById("progress")
-
-      async function build(mode) {
-        progress.className = "p-4 rounded-lg bg-zinc-900 text-sm"
-        progress.textContent = mode === "offline"
-          ? "Building (this may take 5-30s for offline mode)..."
-          : "Building..."
-
-        try {
-          // Find entry point
-          let entryPoint = "/src/main.tsx"
-          const alts = ["/src/main.tsx", "/src/main.ts", "/src/index.tsx", "/src/index.ts"]
-          for (const alt of alts) {
-            if (sourceFiles[alt]) { entryPoint = alt; break }
-          }
-
-          const result = await buildSinglefile({
-            mode,
-            sourceFiles,
-            deps,
-            entryPoint,
-            title,
-          })
-
-          if (result.errors.length > 0) {
-            progress.innerHTML = '<span class="text-red-400">Build errors:</span><br>' +
-              result.errors.map(e => e).join("<br>")
-            return
-          }
-
-          const kb = (result.size / 1024).toFixed(1)
-          progress.innerHTML = \`<span class="text-green-400">Built successfully!</span> \${kb} KB, \${result.externals.length} externals\`
-
-          downloadHtml(result.html, \`\${title.toLowerCase().replace(/\\s+/g, "-")}.html\`)
-        } catch (e) {
-          progress.innerHTML = '<span class="text-red-400">Error:</span> ' + e.message
-        }
-      }
-
-      document.getElementById("online").onclick = () => build("online")
-      document.getElementById("offline").onclick = () => build("offline")
-    }
-
-    init().catch(e => { status.innerHTML = '<span class="text-red-400">Error:</span> ' + e.message })
-  </script>
 </body>
 </html>`
 }
