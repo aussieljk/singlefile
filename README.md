@@ -66,3 +66,7 @@ The builder UI includes a form to POST the built HTML to any URL:
 - Click "Build & Send"
 
 The HTML is sent as the request body with `Content-Type: text/html`.
+
+## Security
+
+The Send-to-URL feature POSTs your built HTML to whatever URL you enter, attaching the Bearer token you provide in an `Authorization` header. The token is sent from your browser directly to that endpoint — only paste tokens for endpoints you trust, and prefer HTTPS URLs so the token isn't sent in plaintext. The builder UI is only served by the Vite dev server and is not part of production builds.
